@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy-web
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: proxy-web
+  template:
+    metadata:
+      labels:
+        app: proxy-web
+    spec:
+      containers:
+        - name: proxy-web
+          image: ghcr.io/jfklt2/proxy-web:0.2.21
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9090
+              name: grpc
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod
+            # Database
+            - name: DB_JDBC_URL
+              value: jdbc:postgresql://postgres:5432/postgres
+            - name: DB_USERNAME
+              value: postgres
+            - name: DB_PASSWORD
+              value: postgres
+            # NATS (homelab NATS runs without auth; placeholders satisfy required @Value bindings)
+            - name: NATS_URL
+              value: nats://nats:4222
+            - name: NATS_USERNAME
+              value: nats
+            - name: NATS_PASSWORD
+              value: nats
+            # Kafka / Schema Registry (Redpanda has SASL disabled in-cluster)
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: redpanda:9093
+            - name: SCHEMA_REGISTRY_URL
+              value: http://redpanda:8081
+            # Override hardcoded SASL_PLAINTEXT in application.yml — Map<String,String> binding via env
+            - name: SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL
+              value: PLAINTEXT
+            - name: SPRING_KAFKA_PROPERTIES_SASL_MECHANISM
+              value: ""
+            - name: SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG
+              value: ""
+            # gRPC (no mTLS in cluster; terminated at gateway externally)
+            - name: GRPC_SERVER_SECURITY_ENABLED
+              value: "false"
+            # OpenTelemetry
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+            - name: OTEL_METRICS_EXPORTER
+              value: otlp
+            - name: OTEL_LOGS_EXPORTER
+              value: otlp
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_SERVICE_NAME
+              value: proxy-web
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: Authorization=Bearer%20${OTEL_TOKEN}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy-web
+  namespace: monitoring
+spec:
+  selector:
+    app: proxy-web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: grpc
+      port: 9090
+      targetPort: 9090
+      appProtocol: kubernetes.io/h2c

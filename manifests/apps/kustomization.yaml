@@ -10,6 +10,9 @@ resources:
   - helm/loki.yaml
   - helm/otel-collector.yaml
   - helm/clickhouse.yaml
+  # Plain-manifest infra (data plane)
+  - infra/postgres.yaml
+  - infra/nats.yaml
   # Cert-Manager (requires CRDs from infrastructure)
   - cert-manager/cluster-issuer.yaml
   - cert-manager/certificates.yaml
@@ -26,6 +29,8 @@ resources:
   - workloads/clickhouse-backup-cron.yaml
   - workloads/proxy-fe-admin.yaml
   - workloads/envoy-agent-proxy.yaml
+  - workloads/proxy-web.yaml
+  - workloads/postgres-backup-cron.yaml
 
 # NOTE: Domain substitution is handled by Flux postBuild.substituteFrom
 # The ${ROOT_DOMAIN} variable is injected from the client-settings ConfigMap
