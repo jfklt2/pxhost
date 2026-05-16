@@ -18,7 +18,18 @@ Flux-managed observability stack for proxy infrastructure. Deploys onto a single
 
 ## Prerequisites
 
-- A server with a public IP and a domain pointed at it (wildcard DNS or individual records for `grafana.`, `ch.`, `otel.` subdomains)
+- A server with a public IP
+- A domain managed in Cloudflare. Create the following A records pointing at the server, all with the **CF proxy enabled** (orange cloud):
+
+  | Subdomain | Purpose |
+  |-----------|---------|
+  | `pa.<ROOT_DOMAIN>` | Proxy admin frontend |
+  | `api.<ROOT_DOMAIN>` | Proxy REST API |
+  | `agent.<ROOT_DOMAIN>` | Proxy gRPC for agents |
+  | `grafana.<ROOT_DOMAIN>` | Grafana UI |
+  | `otel.<ROOT_DOMAIN>` | OTEL OTLP HTTP ingest |
+  | `ch.<ROOT_DOMAIN>` | ClickHouse HTTP API |
+
 - OTEL bearer token (for authenticating proxy-agent telemetry)
 
 ## Fresh install
@@ -56,8 +67,6 @@ The script will prompt for:
 | `CLICKHOUSE_BACKUP_S3_FORCE_PATH_STYLE` | Optional S3 path style toggle (default: `true`) |
 | `CLICKHOUSE_BACKUP_S3_ACCESS_KEY` | Optional S3 access key |
 | `CLICKHOUSE_BACKUP_S3_SECRET_KEY` | Optional S3 secret key |
-| `CH_MIGRATION_TAG` | ClickHouse migration image version (default: `v6.1`) |
-| Node exporter targets | Path to a JSON file with scrape targets (optional) |
 
 The script installs Flux, Gateway API CRDs, creates a `client-settings` ConfigMap with these values, and points Flux at this repo. Everything else reconciles automatically.
 
