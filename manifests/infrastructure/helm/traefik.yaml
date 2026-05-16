@@ -35,6 +35,11 @@ spec:
     gatewayClass:
       enabled: true
     ports:
+      websecure:
+        transport:
+          respondingTimeouts:
+            readTimeout: "0"
+            idleTimeout: "0"
       otel:
         port: 4317
         expose:
