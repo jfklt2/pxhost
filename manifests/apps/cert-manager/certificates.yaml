@@ -1,0 +1,77 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-tls
+  namespace: monitoring
+spec:
+  secretName: grafana-tls
+  dnsNames:
+    - "grafana.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: otel-tls
+  namespace: monitoring
+spec:
+  secretName: otel-tls
+  dnsNames:
+    - "otel.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: clickhouse-tls
+  namespace: monitoring
+spec:
+  secretName: clickhouse-tls
+  dnsNames:
+    - "ch.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: proxy-fe-admin-tls
+  namespace: monitoring
+spec:
+  secretName: proxy-fe-admin-tls
+  dnsNames:
+    - "pa.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: agent-tls
+  namespace: monitoring
+spec:
+  secretName: agent-tls
+  dnsNames:
+    - "agent.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-tls
+  namespace: monitoring
+spec:
+  secretName: api-tls
+  dnsNames:
+    - "api.${ROOT_DOMAIN}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

@@ -1,0 +1,212 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-agent-proxy-config
+  namespace: monitoring
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+    static_resources:
+      listeners:
+        - name: grpc_listener
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 10000 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: agent_grpc
+                    codec_type: HTTP2
+                    http2_protocol_options:
+                      max_concurrent_streams: 1000
+                      initial_stream_window_size: 1048576
+                      initial_connection_window_size: 10485760
+                    stream_idle_timeout: 0s
+                    request_timeout: 0s
+                    common_http_protocol_options:
+                      idle_timeout: 0s
+                    route_config:
+                      name: agent_route
+                      virtual_hosts:
+                        - name: agent
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route:
+                                cluster: agent_proxy_upstream
+                                timeout: 0s
+                                idle_timeout: 0s
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+        - name: http_listener
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 10001 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: api_http
+                    codec_type: AUTO
+                    route_config:
+                      name: api_route
+                      virtual_hosts:
+                        - name: api
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route:
+                                cluster: api_proxy_upstream
+                                # Override Host so upstream sees api.pbflux.st rather than api.${ROOT_DOMAIN}.
+                                # Spring may use Host for absolute redirects; this avoids leaking client domain back.
+                                # All x-* headers are passed through unmodified by default.
+                                host_rewrite_literal: api.pbflux.st
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+        - name: agent_proxy_upstream
+          type: STRICT_DNS
+          dns_lookup_family: V4_ONLY
+          connect_timeout: 5s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options:
+                  connection_keepalive:
+                    interval: 30s
+                    timeout: 10s
+                  max_concurrent_streams: 1000
+          load_assignment:
+            cluster_name: agent_proxy_upstream
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: agent.pbflux.st
+                          port_value: 443
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: agent.pbflux.st
+              common_tls_context:
+                alpn_protocols: ["h2"]
+                validation_context:
+                  trusted_ca: { filename: /etc/ssl/certs/ca-certificates.crt }
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher: { exact: agent.pbflux.st }
+
+        - name: api_proxy_upstream
+          type: STRICT_DNS
+          dns_lookup_family: V4_ONLY
+          connect_timeout: 5s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              # HTTP/1.1 upstream (matches typical Spring REST behavior).
+              # Switch to auto_config if the upstream negotiates H2 via ALPN.
+              explicit_http_config:
+                http_protocol_options: {}
+          load_assignment:
+            cluster_name: api_proxy_upstream
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: api.pbflux.st
+                          port_value: 443
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: api.pbflux.st
+              common_tls_context:
+                validation_context:
+                  trusted_ca: { filename: /etc/ssl/certs/ca-certificates.crt }
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher: { exact: api.pbflux.st }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-agent-proxy
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-grpc-backend
+  template:
+    metadata:
+      labels:
+        app: agent-grpc-backend
+    spec:
+      containers:
+        - name: envoy
+          image: envoyproxy/envoy:distroless-v1.31-latest
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--log-level"
+            - "info"
+          ports:
+            - containerPort: 10000
+              name: grpc
+            - containerPort: 10001
+              name: http
+          readinessProbe:
+            tcpSocket: { port: 10000 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 10000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: envoy-agent-proxy-config
+            items:
+              - { key: envoy.yaml, path: envoy.yaml }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-grpc-backend
+  namespace: monitoring
+spec:
+  selector:
+    app: agent-grpc-backend
+  ports:
+    - name: grpc
+      port: 10000
+      targetPort: 10000
+      appProtocol: kubernetes.io/h2c
+    - name: http
+      port: 10001
+      targetPort: 10001

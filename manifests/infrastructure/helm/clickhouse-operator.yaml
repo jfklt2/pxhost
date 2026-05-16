@@ -1,0 +1,40 @@
+# Altinity ClickHouse Operator
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: altinity
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://docs.altinity.com/clickhouse-operator/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: clickhouse-operator
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: altinity-clickhouse-operator
+      sourceRef:
+        kind: HelmRepository
+        name: altinity
+        namespace: flux-system
+  values:
+    configs:
+      configdFiles:
+        01-clickhouse-03-query_log.xml: |
+          <clickhouse>
+            <query_log remove="1"/>
+            <query_thread_log remove="1"/>
+          </clickhouse>
+        01-clickhouse-04-part_log.xml: |
+          <clickhouse>
+            <part_log remove="1"/>
+          </clickhouse>
+        01-clickhouse-05-trace_log.xml: |
+          <clickhouse>
+            <trace_log remove="1"/>
+          </clickhouse>

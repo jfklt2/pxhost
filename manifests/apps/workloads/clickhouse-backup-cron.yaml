@@ -1,0 +1,110 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: clickhouse-backup-cron
+  namespace: monitoring
+spec:
+  schedule: "52 14 * * 0,3"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: run-clickhouse-backup
+              image: clickhouse/clickhouse-server:25.12
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: "chi-clickhouse-simple-cluster-0-0.monitoring.svc.cluster.local"
+                - name: CLICKHOUSE_PORT
+                  value: "9000"
+                - name: CLICKHOUSE_USER
+                  value: "default"
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-credentials
+                      key: password
+                - name: ROOT_DOMAIN
+                  value: "${ROOT_DOMAIN}"
+              command:
+                - bash
+                - -ec
+                - |
+                  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+
+                  if [[ -n "$CLICKHOUSE_PASSWORD" ]]; then
+                    PASSWORD_ARG="--password=$CLICKHOUSE_PASSWORD"
+                  else
+                    PASSWORD_ARG=""
+                  fi
+
+                  clickhouse_query() {
+                    clickhouse-client \
+                      --host="$CLICKHOUSE_HOST" \
+                      --port="$CLICKHOUSE_PORT" \
+                      --user="$CLICKHOUSE_USER" \
+                      $PASSWORD_ARG \
+                      --query "$1"
+                  }
+
+                  wait_for_clickhouse() {
+                    local attempt=0
+                    until clickhouse_query "SELECT 1 FORMAT TabSeparatedRaw" >/dev/null 2>&1; do
+                      attempt=$((attempt + 1))
+                      if [[ $attempt -ge 24 ]]; then
+                        echo "ClickHouse did not become reachable in time"
+                        return 1
+                      fi
+                      sleep 5
+                    done
+                  }
+
+                  wait_for_backup() {
+                    local command="$1"
+                    local table_name="$2"
+                    local status=""
+                    while true; do
+                      status="$(clickhouse_query "SELECT status FROM system.backup_actions WHERE command='$command' ORDER BY start DESC LIMIT 1 FORMAT TabSeparatedRaw")"
+                      if [[ "$status" != "in progress" ]]; then
+                        break
+                      fi
+                      sleep 5
+                    done
+
+                    if [[ "$status" != "success" ]]; then
+                      clickhouse_query "SELECT start,finish,status,error FROM system.backup_actions WHERE command='$command' ORDER BY start DESC LIMIT 1 FORMAT Vertical"
+                      return 1
+                    fi
+                  }
+
+                  backup_table_if_exists() {
+                    local table_name="$1"
+                    local backup_slug="$2"
+                    local table_exists
+                    table_exists="$(clickhouse_query "EXISTS TABLE $table_name FORMAT TabSeparatedRaw")"
+
+                    if [[ "$table_exists" != "1" ]]; then
+                      echo "Skipping $table_name: table not present on this node"
+                      return 0
+                    fi
+
+                    local backup_name="$backup_slug-$RUN_ID"
+                    local command="create_remote --tables=$table_name --delete $backup_name"
+
+                    echo "Starting backup for $table_name as $backup_name"
+                    clickhouse_query "INSERT INTO system.backup_actions(command) VALUES('$command')"
+                    wait_for_backup "$command" "$table_name"
+                    echo "Backup finished for $table_name"
+                  }
+
+                  wait_for_clickhouse
+                  backup_table_if_exists "app_v2.connection_transfer_stats" "app-v2-connection-transfer-stats"

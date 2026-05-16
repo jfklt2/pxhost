@@ -1,0 +1,220 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: opentelemetry
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  interval: 30m
+  dependsOn:
+    - name: redpanda
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: "0.104.0"
+      sourceRef:
+        kind: HelmRepository
+        name: opentelemetry
+        namespace: flux-system
+  values:
+    fullnameOverride: otel-collector
+
+    mode: deployment
+    replicaCount: 1
+
+    image:
+      repository: otel/opentelemetry-collector-contrib
+
+    # Disable all chart presets (they add prometheus receiver, etc)
+    presets:
+      logsCollection:
+        enabled: false
+      hostMetrics:
+        enabled: false
+      kubernetesAttributes:
+        enabled: false
+      kubeletMetrics:
+        enabled: false
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 1Gi
+      limits:
+        cpu: 4
+        memory: 8Gi
+
+    ports:
+      otlp:
+        enabled: true
+        containerPort: 4317
+        servicePort: 4317
+        protocol: TCP
+        appProtocol: kubernetes.io/h2c
+      otlp-http:
+        enabled: true
+        containerPort: 4318
+        servicePort: 4318
+        protocol: TCP
+      # Disable unused default ports
+      jaeger-compact:
+        enabled: false
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      zipkin:
+        enabled: false
+
+    extraVolumes:
+      - name: node-exporter-targets
+        configMap:
+          name: node-exporter-targets
+    extraVolumeMounts:
+      - name: node-exporter-targets
+        mountPath: /etc/otel/node-exporter
+        readOnly: true
+
+    # Use alternateConfig to completely replace defaults (no merging)
+    alternateConfig:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+              auth:
+                authenticator: bearertokenauth
+            http:
+              endpoint: 0.0.0.0:4318
+              auth:
+                authenticator: bearertokenauth
+        prometheus/infra:
+          config:
+            scrape_configs:
+              - job_name: clickhouse
+                scrape_interval: 30s
+                static_configs:
+                  - targets:
+                      - chi-clickhouse-simple-cluster-0-0:9363
+              - job_name: redpanda
+                scrape_interval: 15s
+                metrics_path: /public_metrics
+                scheme: https
+                tls_config:
+                  insecure_skip_verify: true
+                static_configs:
+                  - targets:
+                      - redpanda.monitoring.svc.cluster.local:9644
+        prometheus/node-exporter:
+          config:
+            scrape_configs:
+              - job_name: node-exporter
+                scrape_interval: 15s
+                file_sd_configs:
+                  - files:
+                      - /etc/otel/node-exporter/targets.json
+
+      extensions:
+        health_check:
+          endpoint: 0.0.0.0:13133
+        bearertokenauth:
+          scheme: Bearer
+          token: "${OTEL_TOKEN}"
+
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_percentage: 90
+          spike_limit_percentage: 10
+        batch:
+          timeout: 5s
+          send_batch_size: 1000
+        batch/traces:
+          timeout: 5s
+          send_batch_size: 1000
+      exporters:
+        debug: {}
+        kafka/logs:
+          protocol_version: "2.1.0"
+          brokers:
+            - redpanda.monitoring.svc.cluster.local:9093
+          topic: otel.logs
+          encoding: otlp_proto
+          producer:
+            max_message_bytes: 10000000
+        kafka/traces:
+          protocol_version: "2.1.0"
+          brokers:
+            - redpanda.monitoring.svc.cluster.local:9093
+          topic: otel.traces
+          encoding: otlp_proto
+          producer:
+            max_message_bytes: 10000000
+        kafka/metrics:
+          protocol_version: "2.1.0"
+          brokers:
+            - redpanda.monitoring.svc.cluster.local:9093
+          topic: otel.metrics
+          encoding: otlp_proto
+          producer:
+            max_message_bytes: 10000000
+        otlphttp/victoriametrics:
+          compression: gzip
+          encoding: proto
+          metrics_endpoint: http://victoria-metrics:8428/opentelemetry/v1/metrics
+          tls:
+            insecure: true
+          sending_queue:
+            enabled: true
+            num_consumers: 10
+            queue_size: 1000
+        otlphttp/loki:
+          endpoint: http://loki:3100/otlp
+          tls:
+            insecure: true
+          sending_queue:
+            enabled: true
+            num_consumers: 5
+            queue_size: 500
+        # Native Prometheus remote write for scraped metrics (preserves original names)
+        prometheusremotewrite/vm:
+          endpoint: http://victoria-metrics:8428/api/v1/write
+          tls:
+            insecure: true
+
+      service:
+        extensions: [health_check, bearertokenauth]
+        pipelines:
+          metrics/kafka:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [kafka/metrics, debug]
+          metrics/victoriametrics:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [otlphttp/victoriametrics]
+          logs/loki:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [otlphttp/loki]
+          logs/kafka:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [kafka/logs, debug]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, batch/traces]
+            exporters: [kafka/traces, debug]
+          # Infrastructure metrics (ClickHouse, etc) - native Prometheus format
+          metrics/infra:
+            receivers: [prometheus/infra, prometheus/node-exporter]
+            processors: [memory_limiter, batch]
+            exporters: [prometheusremotewrite/vm]

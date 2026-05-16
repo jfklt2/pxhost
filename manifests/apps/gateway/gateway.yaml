@@ -1,0 +1,109 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: observability-gateway
+  namespace: monitoring
+spec:
+  gatewayClassName: traefik
+  listeners:
+    # HTTP listener for ACME HTTP-01 challenge
+    # Port 8000 = Traefik's "web" entrypoint (exposed as 80)
+    - name: http
+      protocol: HTTP
+      port: 8000
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for Grafana
+    # Port 8443 = Traefik's "websecure" entrypoint (exposed as 443)
+    - name: https-grafana
+      protocol: HTTPS
+      port: 8443
+      hostname: "grafana.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: grafana-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for OTEL
+    - name: https-otel
+      protocol: HTTPS
+      port: 8443
+      hostname: "otel.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: otel-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for ClickHouse
+    - name: https-clickhouse
+      protocol: HTTPS
+      port: 8443
+      hostname: "ch.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: clickhouse-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # Plain HTTP listener for OTEL (legacy port 4317, backwards compat)
+    - name: otel-legacy
+      protocol: HTTP
+      port: 4317
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for Proxy FE admin
+    - name: https-admin
+      protocol: HTTPS
+      port: 8443
+      hostname: "pa.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: proxy-fe-admin-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for gRPC agent traffic (Envoy reverse-proxy to upstream coordinator)
+    - name: https-agent
+      protocol: HTTPS
+      port: 8443
+      hostname: "agent.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: agent-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS listener for REST api traffic (Envoy reverse-proxy to upstream coordinator HTTP)
+    - name: https-api
+      protocol: HTTPS
+      port: 8443
+      hostname: "api.${ROOT_DOMAIN}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: api-tls
+      allowedRoutes:
+        namespaces:
+          from: Same

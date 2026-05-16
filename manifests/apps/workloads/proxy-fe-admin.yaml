@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy-fe-admin
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: proxy-fe-admin
+  template:
+    metadata:
+      labels:
+        app: proxy-fe-admin
+    spec:
+      containers:
+        - name: proxy-fe-admin
+          image: ghcr.io/jfklt2/proxy-admin:0.0.5
+          ports:
+            - containerPort: 3000
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3000"
+            - name: COORDINATOR_HOST
+              value: "https://agent.${ROOT_DOMAIN}"
+            - name: COORDINATOR_HOST_PORT
+              value: "agent.${ROOT_DOMAIN}:443"
+            - name: RELEASE_BASE_URL
+              value: "https://github.com/jfklt2/pxhost/releases"
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy-fe-admin
+  namespace: monitoring
+spec:
+  selector:
+    app: proxy-fe-admin
+  ports:
+    - port: 3000
+      targetPort: 3000

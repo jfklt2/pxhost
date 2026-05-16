@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Helm Releases
+  - helm/redpanda.yaml
+  - helm/grafana.yaml
+  - helm/victoria-metrics.yaml
+  - helm/victoria-metrics-k8s-stack.yaml
+  - helm/loki.yaml
+  - helm/otel-collector.yaml
+  - helm/clickhouse.yaml
+  # Cert-Manager (requires CRDs from infrastructure)
+  - cert-manager/cluster-issuer.yaml
+  - cert-manager/certificates.yaml
+  # Gateway API
+  - gateway/gateway.yaml
+  - gateway/otel-grpc-route.yaml
+  - gateway/otel-http-route.yaml
+  - gateway/proxy-fe-admin-http-route.yaml
+  - gateway/otel-legacy-route.yaml
+  - gateway/agent-grpc-route.yaml
+  - gateway/api-http-route.yaml
+  # Workloads
+  - workloads/analytics-streams.yaml
+  - workloads/clickhouse-backup-cron.yaml
+  - workloads/proxy-fe-admin.yaml
+  - workloads/envoy-agent-proxy.yaml
+
+# NOTE: Domain substitution is handled by Flux postBuild.substituteFrom
+# The ${ROOT_DOMAIN} variable is injected from the client-settings ConfigMap

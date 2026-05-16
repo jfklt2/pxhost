@@ -1,0 +1,12 @@
+# Inflated Helm charts (Flux handles this)
+manifests/charts/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Let's Encrypt local certs (if any)
+letsencrypt/

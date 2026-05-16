@@ -1,0 +1,22 @@
+# Example dashboard ConfigMap
+# Rename to .yaml and add your dashboard JSON
+#
+# To add a dashboard:
+# 1. Copy this file and rename to my-dashboard.yaml
+# 2. Replace the JSON content with your dashboard export
+# 3. Add the file to kustomization.yaml resources
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-example
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  example.json: |
+    {
+      "title": "Example Dashboard",
+      "uid": "example",
+      "panels": []
+    }

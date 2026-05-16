@@ -1,0 +1,74 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: redpanda
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.redpanda.com
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: redpanda
+  namespace: monitoring
+spec:
+  interval: 30m
+  timeout: 15m
+  chart:
+    spec:
+      chart: redpanda
+      version: "5.9.18"
+      sourceRef:
+        kind: HelmRepository
+        name: redpanda
+        namespace: flux-system
+  values:
+    statefulset:
+      replicas: 1
+
+    storage:
+      persistentVolume:
+        enabled: true
+        size: 20Gi
+
+    listeners:
+      kafka:
+        tls:
+          enabled: false
+      schemaRegistry:
+        tls:
+          enabled: false
+
+    config:
+      tunable:
+        kafka_batch_max_bytes: 5242880
+
+    auth:
+      sasl:
+        enabled: false
+
+    console:
+      enabled: true
+      ingress:
+        enabled: false
+      service:
+        targetPort: 8080
+      deployment:
+        replicas: 1
+      config:
+        kafka:
+          brokers:
+            - redpanda-0.redpanda.monitoring.svc.cluster.local:9093
+        redpanda:
+          adminApi:
+            enabled: true
+            urls:
+              - http://redpanda-0.redpanda.monitoring.svc.cluster.local:9644
+
+    resources:
+      cpu:
+        cores: 2
+      memory:
+        container:
+          max: 8Gi

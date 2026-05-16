@@ -1,0 +1,134 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://grafana.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: grafana
+      version: "10.3.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    # Admin credentials
+    adminUser: admin
+    adminPassword: ${ADMIN_PASSWORD}
+
+    # Plugins
+    plugins:
+      - grafana-clickhouse-datasource
+
+    # Persistence
+    persistence:
+      enabled: true
+      size: 1Gi
+
+    # Disable init container that fails on some storage classes
+    initChownData:
+      enabled: false
+
+    # Use fsGroup instead for volume permissions
+    securityContext:
+      runAsUser: 472
+      runAsGroup: 472
+      fsGroup: 472
+
+    # Resources (fixed)
+    resources:
+      requests:
+        cpu: 50m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+
+    # Gateway API route (replaces our custom HTTPRoute)
+    route:
+      main:
+        enabled: true
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        parentRefs:
+          - name: observability-gateway
+            namespace: monitoring
+            sectionName: https-grafana
+        hostnames:
+          - "grafana.${ROOT_DOMAIN}"
+        matches:
+          - path:
+              type: PathPrefix
+              value: /
+
+    # Datasources provisioning
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        deleteDatasources:
+          - name: VictoriaMetrics
+            orgId: 1
+        datasources:
+          - name: VictoriaMetrics
+            type: prometheus
+            uid: victoriametrics
+            url: http://victoria-metrics:8428
+            access: proxy
+          - name: Loki
+            type: loki
+            url: http://loki:3100
+            access: proxy
+          - name: ClickHouse
+            type: grafana-clickhouse-datasource
+            access: proxy
+            isDefault: true
+            jsonData:
+              defaultDatabase: default
+              port: 8123
+              protocol: http
+              host: chi-clickhouse-simple-cluster-0-0.monitoring.svc
+              username: default
+              traces:
+                defaultDatabase: default
+                defaultTable: otel_traces
+                otelEnabled: true
+                otelVersion: latest
+            secureJsonData:
+              password: ${ADMIN_PASSWORD}
+
+    # Dashboard sidecar - watches for ConfigMaps with label grafana_dashboard: "1"
+    # Subfolder is taken from the ConfigMap's grafana_folder annotation.
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        folder: /tmp/dashboards
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
+
+    # Grafana configuration
+    grafana.ini:
+      paths:
+        data: /var/lib/grafana/
+        logs: /var/log/grafana
+        plugins: /var/lib/grafana/plugins
+        provisioning: /etc/grafana/provisioning
+      analytics:
+        check_for_updates: false
+      log:
+        mode: console
+      server:
+        domain: "grafana.${ROOT_DOMAIN}"
+        root_url: "https://grafana.${ROOT_DOMAIN}"

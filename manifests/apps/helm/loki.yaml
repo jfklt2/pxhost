@@ -1,0 +1,122 @@
+# HelmRepository defined in grafana.yaml (same repo)
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: loki
+      version: "6.48.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: flux-system
+  values:
+    # SingleBinary deployment mode
+    deploymentMode: SingleBinary
+
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      storage:
+        type: s3
+        bucketNames:
+          chunks: chunks
+          ruler: ruler
+          admin: admin
+        s3:
+          endpoint: http://loki-minio.monitoring.svc:9000
+          secretAccessKey: supersecret
+          accessKeyId: enterprise-logs
+          s3ForcePathStyle: true
+          insecure: true
+      schemaConfig:
+        configs:
+          - from: "2024-04-01"
+            store: tsdb
+            object_store: s3
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+      ingester:
+        chunk_encoding: snappy
+      tracing:
+        enabled: true
+      querier:
+        max_concurrent: 4
+      # Direct config override to ensure http:// prefix is used
+      structuredConfig:
+        common:
+          storage:
+            s3:
+              endpoint: http://loki-minio.monitoring.svc:9000
+              bucketnames: chunks
+              secret_access_key: supersecret
+              access_key_id: enterprise-logs
+              s3forcepathstyle: true
+              insecure: true
+        compactor:
+          working_directory: /var/loki/compactor
+          compaction_interval: 10m
+          retention_enabled: true
+          retention_delete_delay: 2h
+          retention_delete_worker_count: 150
+          delete_request_store: s3
+        limits_config:
+          retention_period: 24h
+          max_query_lookback: 24h
+
+    singleBinary:
+      replicas: 1
+      resources:
+        limits:
+          memory: ${LOKI_MEMORY_LIMIT}Mi
+        requests:
+          cpu: 100m
+          memory: ${LOKI_MEMORY_REQUEST}Mi
+      extraEnv:
+        - name: GOMEMLIMIT
+          value: ${LOKI_GOMEMLIMIT}MiB
+
+    chunksCache:
+      allocatedMemory: ${LOKI_CHUNKS_CACHE_MB}
+      writebackSizeLimit: 50MB
+    resultsCache:
+      allocatedMemory: ${LOKI_RESULTS_CACHE_MB}
+
+    # Enable minio for storage
+    minio:
+      enabled: true
+      rootUser: enterprise-logs
+      rootPassword: supersecret
+
+    # Zero out replica counts of other deployment modes
+    backend:
+      replicas: 0
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    ingester:
+      replicas: 0
+    querier:
+      replicas: 0
+    queryFrontend:
+      replicas: 0
+    queryScheduler:
+      replicas: 0
+    distributor:
+      replicas: 0
+    compactor:
+      replicas: 0
+    indexGateway:
+      replicas: 0
+    bloomCompactor:
+      replicas: 0
+    bloomGateway:
+      replicas: 0

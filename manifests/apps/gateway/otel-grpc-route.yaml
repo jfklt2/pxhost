@@ -1,0 +1,15 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: otel-grpc-route
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: observability-gateway
+      sectionName: https-otel
+  hostnames:
+    - "otel.${ROOT_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: otel-collector
+          port: 4317

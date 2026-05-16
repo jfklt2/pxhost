@@ -1,0 +1,15 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: agent-grpc-route
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: observability-gateway
+      sectionName: https-agent
+  hostnames:
+    - "agent.${ROOT_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: agent-grpc-backend
+          port: 10000

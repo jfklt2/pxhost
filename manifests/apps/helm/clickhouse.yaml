@@ -1,0 +1,197 @@
+# ClickHouse credentials (operator installed via infrastructure)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clickhouse-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: ${ADMIN_PASSWORD}
+---
+# ClickHouse Installation
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: clickhouse
+  namespace: monitoring
+spec:
+  defaults:
+    templates:
+      podTemplate: clickhouse-pod
+      dataVolumeClaimTemplate: data-volume
+
+  configuration:
+    users:
+      default/password:
+        valueFrom:
+          secretKeyRef:
+            name: clickhouse-credentials
+            key: password
+      default/networks/ip: "::/0"
+
+    settings:
+      logger/level: information
+      prometheus/endpoint: /metrics
+      prometheus/port: 9363
+      prometheus/metrics: true
+      prometheus/events: true
+      prometheus/asynchronous_metrics: true
+
+    files:
+      config.d/z_log_disable.xml: |
+        <clickhouse>
+          <asynchronous_metric_log remove="1"/>
+          <backup_log remove="1"/>
+          <error_log remove="1"/>
+          <metric_log remove="1"/>
+          <query_metric_log remove="1"/>
+          <query_views_log remove="1"/>
+          <session_log remove="1"/>
+          <text_log remove="1"/>
+          <crash_log remove="1"/>
+          <opentelemetry_span_log remove="1"/>
+          <zookeeper_log remove="1"/>
+          <processors_profile_log remove="1"/>
+          <latency_log remove="1"/>
+          <background_schedule_pool_log remove="1"/>
+          <aggregated_zookeeper_log remove="1"/>
+          <zookeeper_connection_log remove="1"/>
+        </clickhouse>
+
+    clusters:
+      - name: "simple-cluster"
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+
+  templates:
+    podTemplates:
+      - name: clickhouse-pod
+        metadata:
+          annotations:
+            backup-config-revision: "2026-05-03-default-s3"
+        spec:
+          securityContext:
+            runAsUser: 101
+            fsGroup: 101
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:25.12
+              resources:
+                requests:
+                  cpu: 1
+                  memory: 2Gi
+                limits:
+                  cpu: 4
+                  memory: ${CLICKHOUSE_MEMORY_LIMIT}Gi
+              securityContext:
+                capabilities:
+                  add: ["SYS_NICE"]
+                  drop: ["ALL"]
+            - name: clickhouse-backup
+              image: altinity/clickhouse-backup:2.6.43
+              imagePullPolicy: IfNotPresent
+              args: ["server"]
+              env:
+                - name: LOG_LEVEL
+                  value: "info"
+                - name: ALLOW_EMPTY_BACKUPS
+                  value: "true"
+                - name: API_LISTEN
+                  value: "0.0.0.0:7171"
+                - name: API_CREATE_INTEGRATION_TABLES
+                  value: "true"
+                - name: REMOTE_STORAGE
+                  value: "s3"
+                - name: BACKUPS_TO_KEEP_LOCAL
+                  value: "-1"
+                - name: BACKUPS_TO_KEEP_REMOTE
+                  value: "3"
+                - name: CLICKHOUSE_USERNAME
+                  value: "default"
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-credentials
+                      key: password
+                - name: CLICKHOUSE_HOST
+                  value: "localhost"
+                - name: CLICKHOUSE_PORT
+                  value: "9000"
+                - name: S3_ENDPOINT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: clickhouse-backup-config
+                      key: endpoint
+                      optional: true
+                - name: S3_REGION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: clickhouse-backup-config
+                      key: region
+                      optional: true
+                - name: S3_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: clickhouse-backup-config
+                      key: bucket
+                      optional: true
+                - name: S3_PATH
+                  value: "clickhouse-backups/${ROOT_DOMAIN}"
+                - name: S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-backup-s3
+                      key: access-key
+                      optional: true
+                - name: S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-backup-s3
+                      key: secret-key
+                      optional: true
+                - name: S3_FORCE_PATH_STYLE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: clickhouse-backup-config
+                      key: force-path-style
+                      optional: true
+                - name: S3_ACL
+                  value: ""
+              ports:
+                - name: backup-rest
+                  containerPort: 7171
+              volumeMounts:
+                - name: data-volume
+                  mountPath: /var/lib/clickhouse
+
+    volumeClaimTemplates:
+      - name: data-volume
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 100Gi
+---
+# Gateway listener for ClickHouse
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: clickhouse-route
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: observability-gateway
+      namespace: monitoring
+      sectionName: https-clickhouse
+  hostnames:
+    - "ch.${ROOT_DOMAIN}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: chi-clickhouse-simple-cluster-0-0
+          port: 8123

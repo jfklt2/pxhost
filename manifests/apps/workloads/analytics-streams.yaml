@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-streams
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-streams
+  template:
+    metadata:
+      labels:
+        app: analytics-streams
+    spec:
+      containers:
+        - name: analytics-streams
+          image: ghcr.io/jfklt2/analytics-streams:0.2.19
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: k8s
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: redpanda.monitoring.svc.cluster.local:9093
+            - name: SCHEMA_REGISTRY_URL
+              value: http://redpanda.monitoring.svc.cluster.local:8081
+            - name: CLICKHOUSE_URL
+              value: jdbc:ch:http://chi-clickhouse-simple-cluster-0-0.monitoring.svc.cluster.local:8123/default
+            - name: CLICKHOUSE_USER
+              value: default
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-credentials
+                  key: password
+            # Flyway placeholders (ClickHouse Kafka Engine perspective)
+            - name: FLYWAY_KAFKA_BROKERS
+              value: redpanda.monitoring.svc.cluster.local:9093
+            - name: FLYWAY_AVRO_SCHEMA_REGISTRY_URL
+              value: http://redpanda.monitoring.svc.cluster.local:8081
+            - name: FLYWAY_KAFKA_SECURITY_PROTOCOL
+              value: plaintext
+          resources:
+            requests:
+              cpu: 200m
+              memory: 3Gi
+            limits:
+              memory: 4Gi
