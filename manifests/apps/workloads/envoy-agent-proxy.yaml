@@ -40,6 +40,7 @@ data:
                                 cluster: agent_proxy_upstream
                                 timeout: 0s
                                 idle_timeout: 0s
+                                host_rewrite_literal: agent.pbflux.st
                     http_filters:
                       - name: envoy.filters.http.router
                         typed_config:
