@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: proxy-fe-admin
-          image: ghcr.io/jfklt2/proxy-admin:0.0.5
+          image: ghcr.io/jfklt2/proxy-admin:0.0.6
           ports:
             - containerPort: 3000
           env:
@@ -29,6 +29,8 @@ spec:
               value: "agent.${ROOT_DOMAIN}:443"
             - name: RELEASE_BASE_URL
               value: "https://github.com/jfklt2/pxhost/releases"
+            - name: API_BASE_URL
+              value: "https://api.${ROOT_DOMAIN}"
           readinessProbe:
             httpGet:
               path: /login
