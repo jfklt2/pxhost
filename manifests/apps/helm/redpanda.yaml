@@ -52,6 +52,7 @@ spec:
       enabled: true
       ingress:
         enabled: false
+        className: ""
       service:
         targetPort: 8080
       deployment:
